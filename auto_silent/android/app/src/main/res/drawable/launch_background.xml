@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Dark green background only -->
+    <item>
+        <color android:color="#2E7D32" />
+    </item>
+
+</layer-list>
