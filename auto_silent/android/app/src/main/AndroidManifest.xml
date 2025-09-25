@@ -14,16 +14,17 @@
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- Services / battery -->
+    <!-- 🔥 CRITICAL: Services / battery permissions for killed app scenarios -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- AlarmManager (Android 12+) -->
+    <!-- 🔥 CRITICAL: Foreground service type permissions (Android 14+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    
+    <!-- 🔥 CRITICAL: AlarmManager permissions (Android 12+) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
@@ -31,7 +32,9 @@
         android:label="Auto Silent"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:allowBackup="true"
+        android:supportsRtl="true">
 
         <!-- Main Flutter Activity -->
         <activity
@@ -41,15 +44,22 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:screenOrientation="portrait">
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Handle disable silent mode actions -->
+            <intent-filter>
+                <action android:name="DISABLE_SILENT_MODE" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -57,87 +67,84 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- AlarmReceiver for handling prayer alarms -->
+        <!-- 🔥 CRITICAL: AlarmReceiver for killed app scenarios -->
         <receiver
             android:name=".AlarmReceiver"
             android:enabled="true"
-            android:exported="false">
-            <intent-filter>
+            android:exported="false"
+            android:directBootAware="true">
+            <intent-filter android:priority="1000">
+                <action android:name="ENABLE_DND" />
+                <action android:name="DISABLE_DND" />
                 <action android:name="com.example.auto_silent.PRAYER_ALARM" />
+                <action android:name="com.example.auto_silent.ENABLE_DND" />
+                <action android:name="com.example.auto_silent.DISABLE_DND" />
             </intent-filter>
         </receiver>
 
-        <!-- BootReceiver: reschedules alarms after reboot/update -->
+        <!-- 🔥 CRITICAL: BootReceiver for rescheduling after device restart -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
             android:exported="true"
             android:directBootAware="true">
             <intent-filter android:priority="1000">
+                <!-- Standard boot events -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                
+                <!-- App update events -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
                 <data android:scheme="package" />
+                
+                <!-- Manufacturer-specific quick boot -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
 
-        <!-- ADDED: Foreground service declaration for flutter_foreground_task -->
+        <!-- 🔥 CRITICAL: Native Prayer DND Service (survives app kill) -->
         <service
-            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Prayer time monitoring for auto-silence" />
-        </service>
-
-        
-        <service
-        android:name=".PrayerDNDService"
-        android:enabled="true"
-        android:exported="false"
-        android:foregroundServiceType="specialUse">
-        <property
-            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-            android:value="Prayer time DND management that works independently" />
-        </service>
-
-        <!-- WorkManager internals (keep as is) -->
-        <service
-            android:name="be.tramckrijte.workmanager.BackgroundWorker"
-            android:exported="false" />
-
-        <receiver
-            android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
+            android:name=".PrayerDNDService"
             android:enabled="true"
             android:exported="false"
-            tools:replace="android:enabled">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.PACKAGE_REPLACED" />
-                <data android:scheme="package" />
-            </intent-filter>
-        </receiver>
-
-        <provider
-            android:name="androidx.startup.InitializationProvider"
-            android:authorities="${applicationId}.androidx-startup"
-            android:exported="false"
-            tools:node="merge">
-            <meta-data
-                android:name="androidx.work.WorkManagerInitializer"
-                android:value="androidx.startup" />
-        </provider>
+            android:foregroundServiceType="specialUse"
+            android:directBootAware="true"
+            android:stopWithTask="false">
+            <!-- 🔥 CRITICAL: Android 14+ special use description -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Prayer time monitoring and automatic DND management that operates independently of the main app to ensure uninterrupted Islamic prayer observance even when app is killed by system or user" />
+        </service>
 
     </application>
 
-    <!-- Queries (text processing example) -->
+    <!-- Enhanced queries for better app compatibility -->
     <queries>
+        <!-- Settings access for permissions -->
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT" />
-            <data android:mimeType="text/plain" />
+            <action android:name="android.settings.APPLICATION_DETAILS_SETTINGS" />
         </intent>
+        <intent>
+            <action android:name="android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.REQUEST_SCHEDULE_EXACT_ALARM" />
+        </intent>
+        
+        <!-- Manufacturer-specific settings -->
+        <package android:name="com.miui.securitycenter" />
+        <package android:name="com.coloros.safecenter" />
+        <package android:name="com.vivo.permissionmanager" />
+        <package android:name="com.huawei.systemmanager" />
+        <package android:name="com.samsung.android.lool" />
+        <package android:name="com.oneplus.security" />
     </queries>
+
 </manifest>

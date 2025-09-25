@@ -186,6 +186,20 @@ class StorageService {
     }
   }
 
+  /// Update app enabled status (explicit setter)
+  Future<void> setAppEnabled(bool enabled) async {
+    try {
+      final currentPrefs = await getUserPreferences();
+      final updatedPrefs = currentPrefs.copyWith(isAppEnabled: enabled);
+      await saveUserPreferences(updatedPrefs);
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error updating app enabled status: $e');
+      }
+      rethrow;
+    }
+  }
+
   /// Update location coordinates
   Future<void> updateLocation(double latitude, double longitude) async {
     try {
@@ -198,6 +212,20 @@ class StorageService {
     } catch (e) {
       if (kDebugMode) {
         print('Error updating location: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// Update calculation method
+  Future<void> updateCalculationMethod(String method) async {
+    try {
+      final currentPrefs = await getUserPreferences();
+      final updatedPrefs = currentPrefs.copyWith(calculationMethod: method);
+      await saveUserPreferences(updatedPrefs);
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error updating calculation method: $e');
       }
       rethrow;
     }
@@ -237,5 +265,24 @@ class StorageService {
   /// Initialize preferences explicitly (optional, for better control)
   Future<void> initialize() async {
     await _prefsInstance;
+  }
+
+  /// Get current app state summary for debugging
+  Future<Map<String, dynamic>> getAppStateSummary() async {
+    try {
+      final prefs = await getUserPreferences();
+      return {
+        'isAppEnabled': prefs.isAppEnabled,
+        'silenceDuration': prefs.silenceDuration,
+        'latitude': prefs.latitude,
+        'longitude': prefs.longitude,
+        'calculationMethod': prefs.calculationMethod,
+        'madhab': prefs.madhab,
+        'enabledPrayers': prefs.enabledPrayers,
+        'lastUpdate': DateTime.now().toIso8601String(),
+      };
+    } catch (e) {
+      return {'error': e.toString()};
+    }
   }
 }

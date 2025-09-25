@@ -112,42 +112,63 @@ class PrayerTimeService {
     return currentTime.isAfter(prayerTime) && currentTime.isBefore(silenceEndTime);
   }
 
-  // Convert string madhab to Adhan package Madhab enum
-  // Only supports: hanafi, shafi, hanbali, jafari (maliki not supported by Adhan package)
+  // FIXED: Convert string madhab to Adhan package Madhab enum
+  // Only supports: hanafi, shafi (not hanbali, jafari as they're not in Adhan package)
   Madhab _getMadhab(String madhab) {
     switch (madhab.toLowerCase()) {
       case 'hanafi':
         return Madhab.hanafi;
       case 'shafi':
       case 'shafii':
+      case 'shafi\'i':
+      case 'hanbali': // Map to shafi as fallback
+      case 'maliki':  // Map to shafi as fallback
+      case 'jafari':  // Map to shafi as fallback
         return Madhab.shafi;
       default:
         return Madhab.shafi; // Default to Shafi
     }
   }
 
+  // FIXED: Updated calculation method mapping to match Adhan package
   CalculationParameters _getCalculationParams(String method) {
     switch (method) {
       case 'MuslimWorldLeague':
+      case 'muslim_world_league':
         return CalculationMethod.muslim_world_league.getParameters();
       case 'Egyptian':
+      case 'egyptian':
         return CalculationMethod.egyptian.getParameters();
       case 'Karachi':
+      case 'karachi':
         return CalculationMethod.karachi.getParameters();
       case 'UmmAlQura':
+      case 'umm_al_qura':
         return CalculationMethod.umm_al_qura.getParameters();
       case 'Dubai':
+      case 'dubai':
         return CalculationMethod.dubai.getParameters();
       case 'MoonsightingCommittee':
+      case 'moonsighting_committee':
         return CalculationMethod.moon_sighting_committee.getParameters();
       case 'NorthAmerica':
+      case 'north_america':
         return CalculationMethod.north_america.getParameters();
       case 'Kuwait':
+      case 'kuwait':
         return CalculationMethod.kuwait.getParameters();
       case 'Qatar':
+      case 'qatar':
         return CalculationMethod.qatar.getParameters();
       case 'Singapore':
+      case 'singapore':
         return CalculationMethod.singapore.getParameters();
+      case 'Turkey':
+      case 'turkey':
+        return CalculationMethod.turkey.getParameters();
+      case 'Tehran':
+      case 'tehran':
+        return CalculationMethod.tehran.getParameters();
       default:
         return CalculationMethod.muslim_world_league.getParameters();
     }
@@ -207,19 +228,94 @@ class PrayerTimeService {
     return DateTime.now().isAfter(prayerTime);
   }
 
-  // Get the name of current madhab in a readable format
+  // FIXED: Get the name of current madhab in a readable format
   String getMadhabDisplayName(String madhab) {
     switch (madhab.toLowerCase()) {
       case 'hanafi':
         return 'Hanafi (حنفی)';
       case 'shafi':
+      case 'shafii':
+      case 'shafi\'i':
         return 'Shafi\'i (شافعی)';
       case 'hanbali':
-        return 'Hanbali (حنبلی)';
+        return 'Hanbali (حنبلی) - Mapped to Shafi\'i';
+      case 'maliki':
+        return 'Maliki (مالکی) - Mapped to Shafi\'i';
       case 'jafari':
-        return 'Jafari (جعفری)';
+        return 'Jafari (جعفری) - Mapped to Shafi\'i';
       default:
         return 'Shafi\'i (شافعی)';
+    }
+  }
+
+  // NEW: Get available calculation methods
+  List<Map<String, String>> getAvailableCalculationMethods() {
+    return [
+      {'key': 'muslim_world_league', 'name': 'Muslim World League'},
+      {'key': 'egyptian', 'name': 'Egyptian General Authority'},
+      {'key': 'karachi', 'name': 'University of Islamic Sciences, Karachi'},
+      {'key': 'umm_al_qura', 'name': 'Umm al-Qura University, Makkah'},
+      {'key': 'dubai', 'name': 'Dubai (UAE)'},
+      {'key': 'qatar', 'name': 'Qatar'},
+      {'key': 'kuwait', 'name': 'Kuwait'},
+      {'key': 'moonsighting_committee', 'name': 'Moonsighting Committee'},
+      {'key': 'singapore', 'name': 'Singapore'},
+      {'key': 'north_america', 'name': 'ISNA (North America)'},
+      {'key': 'turkey', 'name': 'Turkey'},
+      {'key': 'tehran', 'name': 'Tehran'},
+    ];
+  }
+
+  // NEW: Get available madhabs (only the ones supported by Adhan package)
+  List<Map<String, String>> getAvailableMadhabs() {
+    return [
+      {'key': 'shafi', 'name': 'Shafi\'i (شافعی) - Earlier Asr'},
+      {'key': 'hanafi', 'name': 'Hanafi (حنفی) - Later Asr'},
+    ];
+  }
+
+  // NEW: Validate coordinates
+  bool isValidCoordinates(double latitude, double longitude) {
+    return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
+  }
+
+  // NEW: Get Qibla direction
+  Future<double?> getQiblaDirection() async {
+    try {
+      final prefs = await _storageService.getUserPreferences();
+      
+      if (prefs.latitude == 0.0 || prefs.longitude == 0.0) {
+        return null;
+      }
+
+      final coordinates = Coordinates(prefs.latitude, prefs.longitude);
+      final qibla = Qibla(coordinates);
+      return qibla.direction;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // NEW: Get Sunnah times
+  Future<Map<String, DateTime>?> getSunnahTimes() async {
+    try {
+      final prayerTimes = await getTodaysPrayerTimes();
+      final prefs = await _storageService.getUserPreferences();
+      
+      final coordinates = Coordinates(prefs.latitude, prefs.longitude);
+      final date = DateComponents.from(DateTime.now());
+      final params = _getCalculationParams(prefs.calculationMethod);
+      params.madhab = _getMadhab(prefs.madhab);
+      
+      final adhanPrayerTimes = PrayerTimes.today(coordinates, params);
+      final sunnahTimes = SunnahTimes(adhanPrayerTimes);
+      
+      return {
+        'middleOfTheNight': sunnahTimes.middleOfTheNight,
+        'lastThirdOfTheNight': sunnahTimes.lastThirdOfTheNight,
+      };
+    } catch (e) {
+      return null;
     }
   }
 }

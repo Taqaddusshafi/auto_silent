@@ -6,169 +6,162 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import java.util.*
+import java.util.Calendar
 
-class AlarmScheduler {
+object AlarmScheduler {
+    private const val TAG = "AlarmScheduler"
 
-    companion object {
-        private const val ENABLE_DND_REQUEST_CODE = 1001
-        private const val DISABLE_DND_REQUEST_CODE = 1002
-        private val PRAYER_NAMES = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
+    // Stable IDs
+    private const val FAJR_ALARM_ID = 1001
+    private const val DHUHR_ALARM_ID = 1002
+    private const val ASR_ALARM_ID = 1003
+    private const val MAGHRIB_ALARM_ID = 1004
+    private const val ISHA_ALARM_ID = 1005
+    private const val FAJR_END_ALARM_ID = 1101
+    private const val DHUHR_END_ALARM_ID = 1102
+    private const val ASR_END_ALARM_ID = 1103
+    private const val MAGHRIB_END_ALARM_ID = 1104
+    private const val ISHA_END_ALARM_ID = 1105
 
-        fun schedulePrayerAlarm(
-            context: Context,
-            prayerName: String,
-            startTimeMillis: Long,
-            durationMinutes: Int
-        ) {
-            try {
-                // Schedule enable DND alarm
-                scheduleAlarm(
-                    context = context,
-                    requestCode = ENABLE_DND_REQUEST_CODE + prayerName.hashCode(),
-                    triggerTimeMillis = startTimeMillis,
-                    action = "ENABLE_DND",
-                    prayerName = prayerName
-                )
+    // Toggle this true for maximum reliability on restrictive OEMs (shows alarm icon)
+    private const val ROBUST_MODE = true
 
-                // Schedule disable DND alarm
-                val endTimeMillis = startTimeMillis + (durationMinutes * 60 * 1000)
-                scheduleAlarm(
-                    context = context,
-                    requestCode = DISABLE_DND_REQUEST_CODE + prayerName.hashCode(),
-                    triggerTimeMillis = endTimeMillis,
-                    action = "DISABLE_DND",
-                    prayerName = prayerName
-                )
+    fun schedulePrayerAlarm(
+        context: Context,
+        prayerName: String,
+        startTimeMillis: Long,
+        durationMinutes: Int
+    ) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-                Log.d(
-                    "AlarmScheduler",
-                    "Scheduled alarms for $prayerName: ${Date(startTimeMillis)} to ${Date(endTimeMillis)}"
-                )
-
-                // Save to SharedPreferences (persist)
-                val prefs = context.getSharedPreferences("prayer_prefs", Context.MODE_PRIVATE)
-                prefs.edit()
-                    .putLong("${prayerName}_start", startTimeMillis)
-                    .putInt("${prayerName}_duration", durationMinutes)
-                    .apply()
-
-            } catch (e: Exception) {
-                Log.e("AlarmScheduler", "Failed to schedule prayer alarm", e)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (!alarmManager.canScheduleExactAlarms()) {
+                Log.e(TAG, "Exact alarms not granted by user on Android 12+")
+                return
             }
         }
 
-        private fun scheduleAlarm(
-            context: Context,
-            requestCode: Int,
-            triggerTimeMillis: Long,
-            action: String,
-            prayerName: String
-        ) {
-            try {
-                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        // ENABLE
+        val enableIntent = Intent(context, AlarmReceiver::class.java).apply {
+            putExtra("action", "ENABLE_DND")
+            putExtra("prayer_name", prayerName)
+            putExtra("duration_minutes", durationMinutes)
+        }
+        val enablePI = PendingIntent.getBroadcast(
+            context,
+            getAlarmIdForPrayer(prayerName),
+            enableIntent,
+            if (Build.VERSION.SDK_INT >= 23)
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            else
+                PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
-                val intent = Intent(context, AlarmReceiver::class.java).apply {
-                    putExtra("action", action)
-                    putExtra("prayer_name", prayerName)
-                    this.action = "com.example.auto_silent.PRAYER_ALARM"
+        // DISABLE
+        val endTimeMillis = startTimeMillis + durationMinutes * 60 * 1000L
+        val disableIntent = Intent(context, AlarmReceiver::class.java).apply {
+            putExtra("action", "DISABLE_DND")
+            putExtra("prayer_name", prayerName)
+        }
+        val disablePI = PendingIntent.getBroadcast(
+            context,
+            getEndAlarmIdForPrayer(prayerName),
+            disableIntent,
+            if (Build.VERSION.SDK_INT >= 23)
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            else
+                PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        if (ROBUST_MODE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            // Show intent for the alarm clock icon (taps open app)
+            val showIntent = PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
+            )
+            // Enable
+            val enableInfo = AlarmManager.AlarmClockInfo(startTimeMillis, showIntent)
+            alarmManager.setAlarmClock(enableInfo, enablePI)
+            // Disable
+            val disableInfo = AlarmManager.AlarmClockInfo(endTimeMillis, showIntent)
+            alarmManager.setAlarmClock(disableInfo, disablePI)
+        } else {
+            // Fallback to exact + allow while idle
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startTimeMillis, enablePI)
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endTimeMillis, disablePI)
                 }
-
-                val pendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    requestCode,
-                    intent,
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    else PendingIntent.FLAG_UPDATE_CURRENT
-                )
-
-                // Primary: AlarmClock (highest reliability for exact time, shows system alarm icon)
-                try {
-                    val alarmInfo = AlarmManager.AlarmClockInfo(triggerTimeMillis, pendingIntent)
-                    alarmManager.setAlarmClock(alarmInfo, pendingIntent)
-                    Log.d("AlarmScheduler", "setAlarmClock scheduled for $prayerName at ${Date(triggerTimeMillis)}")
-                } catch (e: Exception) {
-                    Log.w("AlarmScheduler", "setAlarmClock failed, falling back to setExactAndAllowWhileIdle: ${e.message}")
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT -> {
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, startTimeMillis, enablePI)
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, endTimeMillis, disablePI)
                 }
-
-                // Fallback: exact allow while idle
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTimeMillis, pendingIntent)
-                    } else {
-                        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTimeMillis, pendingIntent)
-                    }
-                    Log.d("AlarmScheduler", "setExact scheduled for $prayerName at ${Date(triggerTimeMillis)}")
-                } catch (e: Exception) {
-                    Log.e("AlarmScheduler", "setExactAndAllowWhileIdle failed: ${e.message}")
+                else -> {
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, startTimeMillis, enablePI)
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, endTimeMillis, disablePI)
                 }
-
-            } catch (e: Exception) {
-                Log.e("AlarmScheduler", "scheduleAlarm error", e)
             }
         }
 
-        fun cancelPrayerAlarm(context: Context, prayerName: String) {
-            try {
-                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        Log.i(TAG, "Scheduled $prayerName: enable ${java.util.Date(startTimeMillis)}, disable ${java.util.Date(endTimeMillis)}")
+    }
 
-                val enablePendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    ENABLE_DND_REQUEST_CODE + prayerName.hashCode(),
-                    Intent(context, AlarmReceiver::class.java).apply { this.action = "com.example.auto_silent.PRAYER_ALARM" },
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_NO_CREATE
-                )
-                enablePendingIntent?.let { alarmManager.cancel(it) }
+    fun cancelPrayerAlarm(context: Context, prayerName: String) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-                val disablePendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    DISABLE_DND_REQUEST_CODE + prayerName.hashCode(),
-                    Intent(context, AlarmReceiver::class.java).apply { this.action = "com.example.auto_silent.PRAYER_ALARM" },
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_NO_CREATE
-                )
-                disablePendingIntent?.let { alarmManager.cancel(it) }
+        val enablePI = PendingIntent.getBroadcast(
+            context,
+            getAlarmIdForPrayer(prayerName),
+            Intent(context, AlarmReceiver::class.java).apply { putExtra("action", "ENABLE_DND"); putExtra("prayer_name", prayerName) },
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE else PendingIntent.FLAG_NO_CREATE
+        )
+        val disablePI = PendingIntent.getBroadcast(
+            context,
+            getEndAlarmIdForPrayer(prayerName),
+            Intent(context, AlarmReceiver::class.java).apply { putExtra("action", "DISABLE_DND"); putExtra("prayer_name", prayerName) },
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE else PendingIntent.FLAG_NO_CREATE
+        )
 
-                Log.d("AlarmScheduler", "Cancelled alarms for $prayerName")
-            } catch (e: Exception) {
-                Log.e("AlarmScheduler", "Failed to cancel alarm", e)
-            }
-        }
+        enablePI?.let { alarmManager.cancel(it) }
+        disablePI?.let { alarmManager.cancel(it) }
+        Log.i(TAG, "Cancelled alarms for $prayerName")
+    }
 
-        fun cancelAllAlarms(context: Context) {
-            try {
-                PRAYER_NAMES.forEach { cancelPrayerAlarm(context, it) }
-                Log.d("AlarmScheduler", "Cancelled all prayer alarms")
-            } catch (e: Exception) {
-                Log.e("AlarmScheduler", "Failed to cancel all alarms", e)
-            }
-        }
+    private fun getAlarmIdForPrayer(prayerName: String): Int = when (prayerName.lowercase()) {
+        "fajr" -> FAJR_ALARM_ID
+        "dhuhr" -> DHUHR_ALARM_ID
+        "asr" -> ASR_ALARM_ID
+        "maghrib" -> MAGHRIB_ALARM_ID
+        "isha" -> ISHA_ALARM_ID
+        else -> prayerName.hashCode()
+    }
 
-        fun rescheduleAllAlarms(context: Context) {
-            try {
-                val prefs = context.getSharedPreferences("prayer_prefs", Context.MODE_PRIVATE)
-                val now = System.currentTimeMillis()
+    private fun getEndAlarmIdForPrayer(prayerName: String): Int = when (prayerName.lowercase()) {
+        "fajr" -> FAJR_END_ALARM_ID
+        "dhuhr" -> DHUHR_END_ALARM_ID
+        "asr" -> ASR_END_ALARM_ID
+        "maghrib" -> MAGHRIB_END_ALARM_ID
+        "isha" -> ISHA_END_ALARM_ID
+        else -> prayerName.hashCode() + 100
+    }
 
-                for (prayer in PRAYER_NAMES) {
-                    var start = prefs.getLong("${prayer}_start", -1L)
-                    val duration = prefs.getInt("${prayer}_duration", -1)
+    // Simple defaults; replace with real times if available from Flutter/SharedPreferences.
+    fun getTodaysPrayerTimes(): List<Pair<String, Long>> {
+        val c = Calendar.getInstance().apply { set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        return listOf(
+            "Fajr" to c.cloneAs(5, 30),
+            "Dhuhr" to c.cloneAs(12, 30),
+            "Asr" to c.cloneAs(15, 30),
+            "Maghrib" to c.cloneAs(18, 30),
+            "Isha" to c.cloneAs(20, 30),
+        )
+    }
 
-                    if (start <= 0 || duration <= 0) {
-                        // nothing saved for this prayer
-                        continue
-                    }
-
-                    // If saved time is already in the past, advance to next possible occurrence
-                    while (start <= now) {
-                        start += 24L * 60L * 60L * 1000L // add one day
-                    }
-
-                    schedulePrayerAlarm(context, prayer, start, duration)
-                    Log.d("AlarmScheduler", "Rescheduled $prayer at ${Date(start)}")
-                }
-            } catch (e: Exception) {
-                Log.e("AlarmScheduler", "Error while rescheduling alarms", e)
-            }
-        }
+    private fun Calendar.cloneAs(h: Int, m: Int): Long {
+        val t = this.clone() as Calendar
+        t.set(Calendar.HOUR_OF_DAY, h); t.set(Calendar.MINUTE, m)
+        return t.timeInMillis
     }
 }

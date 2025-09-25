@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salah_silence_app/services/storage_service.dart';
 import 'dart:async';
 import '../models/prayer_time.dart';
 import '../services/prayer_time_service.dart';
@@ -21,6 +22,7 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
   List<PrayerTime> _prayerTimes = [];
   bool _isLoading = true;
   bool _isTestingDND = false;
+  bool _isTestingAlarmManager = false;
   DateTime _selectedDate = DateTime.now();
   
   // Custom prayer time test variables
@@ -30,11 +32,15 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
   Timer? _customCheckTimer;
   TimeOfDay _selectedCustomTime = TimeOfDay.now();
 
+  // AlarmManager status
+  bool _alarmManagerScheduled = false;
+
   @override
   void initState() {
     super.initState();
     _loadPrayerTimes();
     _updateCustomTimeController();
+    _checkAlarmManagerStatus();
   }
 
   @override
@@ -43,6 +49,336 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
     _customCheckTimer?.cancel();
     _customTimeController.dispose();
     super.dispose();
+  }
+
+  // Check AlarmManager scheduling status
+ // Check AlarmManager scheduling status
+Future<void> _checkAlarmManagerStatus() async {
+  try {
+    // Create StorageService instance directly (it's a singleton)
+    final storageService = StorageService();
+    final prefs = await storageService.getUserPreferences();
+    setState(() {
+      _alarmManagerScheduled = prefs.isAppEnabled;
+    });
+  } catch (e) {
+    print('Error checking AlarmManager status: $e');
+  }
+}
+
+
+
+  // Test AlarmManager functionality
+  Future<void> _testAlarmManagerFunctionality() async {
+    setState(() {
+      _isTestingAlarmManager = true;
+    });
+
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.alarm, color: Colors.purple.shade600),
+              const SizedBox(width: 8),
+              const Text('Testing AlarmManager'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('Testing AlarmManager prayer scheduling...'),
+              const SizedBox(height: 8),
+              Text(
+                'This will schedule and verify prayer alarms',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Test AlarmManager setup
+      final alarmManagerResult = await _silentModeService.setupDailyPrayerAlarms();
+      
+      if (alarmManagerResult) {
+        Navigator.of(context).pop();
+        await _showAlarmManagerSuccessDialog();
+        await _checkAlarmManagerStatus();
+      } else {
+        Navigator.of(context).pop();
+        await _showAlarmManagerFailedDialog();
+      }
+    } catch (e) {
+      Navigator.of(context).pop();
+      await _showAlarmManagerErrorDialog(e.toString());
+    } finally {
+      setState(() {
+        _isTestingAlarmManager = false;
+      });
+    }
+  }
+
+  // Test multi-day AlarmManager scheduling
+  Future<void> _testMultiDayAlarmScheduling() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.date_range, color: Colors.indigo.shade600),
+            const SizedBox(width: 8),
+            const Text('Multi-Day Alarm Test'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            const Text('Scheduling prayers for next 3 days...'),
+            const SizedBox(height: 8),
+            Text(
+              'This ensures continuous operation',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final multiDayResult = await _silentModeService.schedulePrayerAlarmsForDays(3);
+      Navigator.of(context).pop();
+      
+      if (multiDayResult) {
+        await _showMultiDaySuccessDialog();
+      } else {
+        await _showMultiDayFailedDialog();
+      }
+    } catch (e) {
+      Navigator.of(context).pop();
+      await _showAlarmManagerErrorDialog(e.toString());
+    }
+  }
+
+  // Cancel all AlarmManager alarms
+  Future<void> _cancelAllAlarms() async {
+    try {
+      final result = await _silentModeService.cancelAllPrayerAlarms();
+      if (result) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All prayer alarms cancelled successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _checkAlarmManagerStatus();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to cancel prayer alarms'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cancelling alarms: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Show AlarmManager success dialog
+  Future<void> _showAlarmManagerSuccessDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green.shade600),
+            const SizedBox(width: 8),
+            const Text('AlarmManager Test Successful!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.alarm_on, color: Colors.green, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Prayer alarms scheduled successfully!',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Alarms will work even if the app is killed or closed.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info, color: Colors.green.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'AlarmManager uses system-level scheduling',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Great!'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show multi-day scheduling success
+  Future<void> _showMultiDaySuccessDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.event_available, color: Colors.indigo.shade600),
+            const SizedBox(width: 8),
+            const Text('Multi-Day Scheduling Success!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.calendar_month, color: Colors.indigo, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Prayer alarms scheduled for next 3 days!',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Your app now has continuous prayer time coverage.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Excellent!'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show AlarmManager failure dialog
+  Future<void> _showAlarmManagerFailedDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red.shade600),
+            const SizedBox(width: 8),
+            const Text('AlarmManager Test Failed'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.alarm_off, color: Colors.red, size: 48),
+            SizedBox(height: 16),
+            Text('Failed to schedule prayer alarms.'),
+            SizedBox(height: 8),
+            Text(
+              'Check permissions and try again.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show multi-day failure dialog
+  Future<void> _showMultiDayFailedDialog() async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red.shade600),
+            const SizedBox(width: 8),
+            const Text('Multi-Day Scheduling Failed'),
+          ],
+        ),
+        content: const Text('Failed to schedule multi-day prayer alarms.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show AlarmManager error dialog
+  Future<void> _showAlarmManagerErrorDialog(String error) async {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red.shade600),
+            const SizedBox(width: 8),
+            const Text('AlarmManager Error'),
+          ],
+        ),
+        content: Text('AlarmManager error:\n\n$error'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _updateCustomTimeController() {
@@ -73,7 +409,7 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
     }
   }
 
-  // Test DND functionality (existing method)
+  // Test DND functionality
   Future<void> _testDNDFunctionality() async {
     setState(() {
       _isTestingDND = true;
@@ -443,7 +779,7 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
     }
   }
 
-  // Existing dialog methods (shortened for brevity)
+  // Dialog methods
   Future<void> _showPermissionRequiredDialog() async {
     showDialog(
       context: context,
@@ -539,45 +875,107 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
     );
   }
 
-  Widget _buildTroubleshootItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          Icon(Icons.circle, size: 6, color: Colors.grey.shade600),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text)),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Prayer Times'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.calendar_today),
-            onPressed: _selectDate,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildTestCard(),
-          _buildCustomTestCard(),
-          _buildDateSelector(),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : RefreshIndicator(
-                    onRefresh: _loadPrayerTimes,
-                    child: _buildPrayerTimesList(),
+  // Build AlarmManager test card
+  Widget _buildAlarmManagerTestCard() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Card(
+        color: Colors.purple.shade50,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.alarm, color: Colors.purple.shade700),
+                  const SizedBox(width: 8),
+                  Text(
+                    'AlarmManager Tests',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.purple.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
+                  const Spacer(),
+                  if (_alarmManagerScheduled)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.alarm_on, size: 14, color: Colors.green.shade700),
+                          const SizedBox(width: 4),
+                          Text(
+                            'SCHEDULED',
+                            style: TextStyle(
+                              color: Colors.green.shade700,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Test AlarmManager scheduling that survives app termination.',
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _isTestingAlarmManager ? null : _testAlarmManagerFunctionality,
+                      icon: _isTestingAlarmManager 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.alarm_add, size: 18),
+                      label: Text(_isTestingAlarmManager ? 'Testing...' : 'Test AlarmManager'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _testMultiDayAlarmScheduling,
+                      icon: const Icon(Icons.date_range, size: 18),
+                      label: const Text('3-Day Test'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_alarmManagerScheduled)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _cancelAllAlarms,
+                    icon: const Icon(Icons.alarm_off, size: 18),
+                    label: const Text('Cancel All Alarms'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade600,
+                      side: BorderSide(color: Colors.red.shade600),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -870,5 +1268,36 @@ class _PrayerTimesScreenState extends State<PrayerTimesScreen> {
       });
       _loadPrayerTimes();
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Prayer Times'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_today),
+            onPressed: _selectDate,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          _buildTestCard(),
+          _buildAlarmManagerTestCard(),
+          _buildCustomTestCard(),
+          _buildDateSelector(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: _loadPrayerTimes,
+                    child: _buildPrayerTimesList(),
+                  ),
+          ),
+        ],
+      ),
+    );
   }
 }
